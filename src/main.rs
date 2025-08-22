@@ -9,39 +9,39 @@ use num_traits::{One, Zero, ToPrimitive};
 use num_integer::Integer;
 
 
-const K: u64 = 16;
-const SECURITY: u64 = 10;
+const K: u32 = 16;
+const SECURITY: u32 = 10;
 
 
-fn is_probably_prime(n: &BigUint, k: u64) -> bool {
-    if n <= &BigUint::from(3u64) {
-        return *n == BigUint::from(2u64) || *n == BigUint::from(3u64);
+fn is_probably_prime(n: &BigUint, k: u32) -> bool {
+    if n <= &BigUint::from(3u32) {
+        return *n == BigUint::from(2u32) || *n == BigUint::from(3u32);
     }
-    if n % 2u64 == BigUint::zero() {
+    if n % 2u32 == BigUint::zero() {
         return false;
     }
 
     // write n−1 as 2^r * d
-    let mut d = n - 1u64;
+    let mut d = n - 1u32;
     let mut r = 0;
-    while &d % 2u64 == BigUint::zero() {
-        d /= 2u64;
+    while &d % 2u32 == BigUint::zero() {
+        d /= 2u32;
         r += 1;
     }
 
     let mut rng = rand::thread_rng();
 
     'witness_loop: for _ in 0..k {
-        let a = rng.gen_biguint_range(&BigUint::from(2u64), &(n - 2u64));
+        let a = rng.gen_biguint_range(&BigUint::from(2u32), &(n - 2u32));
         let mut x = a.modpow(&d, n);
 
-        if x == One::one() || x == n - 1u64 {
+        if x == One::one() || x == n - 1u32 {
             continue 'witness_loop;
         }
 
         for _ in 0..r - 1 {
-            x = x.modpow(&BigUint::from(2u64), n);
-            if x == n - 1u64 {
+            x = x.modpow(&BigUint::from(2u32), n);
+            if x == n - 1u32 {
                 continue 'witness_loop;
             }
         }
@@ -80,6 +80,8 @@ fn help(verbose: bool) {
         println!("s: Show saved variables");
         println!("h: Show this help");
         println!("q: Quit");
+    } else {
+        println!("Type 'h' for help")
     }
 }
 
@@ -95,7 +97,7 @@ fn generate_keys_(size: u32, c: Option<(&BigUint, &BigUint)>) -> Option<(BigUint
             q = q_.clone();
         },
         None => {
-            let upper_bound = BigUint::one() * BigUint::from(10u64).pow(size);
+            let upper_bound = BigUint::one() * BigUint::from(10u32).pow(size);
             p = loop {
                 let num = rng.gen_biguint_below(&upper_bound);
                 if is_probably_prime(&num, K) {
@@ -117,7 +119,7 @@ fn generate_keys_(size: u32, c: Option<(&BigUint, &BigUint)>) -> Option<(BigUint
     let e;
     let mut i = phi_n.clone();
     e = loop {
-        if i < BigUint::from(2u64) {
+        if i < BigUint::from(2u32) {
             return None;
         }
         if &i % &p == BigUint::zero() || &i % &q == BigUint::zero() {
@@ -146,7 +148,7 @@ fn generate_keys(size: u32, c: Option<(&BigUint, &BigUint)>) -> (BigUint, BigUin
             Some((p, q, n, phi_n, e, d)) => {
                 let mut rng = rand::thread_rng();
                 for _ in 0..SECURITY {
-                    let t: u64 = rng.gen_range(1..10000);
+                    let t: u8 = rng.gen_range(2..=255);
                     let c = encrypt_byte(t, &e, &n);
                     let u = decrypt_byte(&c, &d, &n);
                     if t != u {
@@ -163,7 +165,7 @@ fn generate_keys(size: u32, c: Option<(&BigUint, &BigUint)>) -> (BigUint, BigUin
 
 }
 
-fn show(keys: Option<(&BigUint, &BigUint, &BigUint)>, c: Option<(&BigUint, &BigUint, &BigUint)>, data: &String, encrypted_data: &Vec<BigUint>) {
+fn show(keys: Option<(&BigUint, &BigUint, &BigUint)>, c: Option<(&BigUint, &BigUint, &BigUint)>, data: &Vec<u32>, encrypted_data: &Vec<BigUint>) {
     if let Some((ref p, ref q, ref phi_n)) = c {
         println!("p: {p}");
         println!("q: {q}");
@@ -180,52 +182,74 @@ fn show(keys: Option<(&BigUint, &BigUint, &BigUint)>, c: Option<(&BigUint, &BigU
 
 }
 
-fn encrypt_byte(data: u64, e: &BigUint, n: &BigUint) -> BigUint {
+fn encrypt_byte(data: u8, e: &BigUint, n: &BigUint) -> BigUint {
     let b = BigUint::from(data);
     return b.modpow(&e, &n);
 }
 
-fn decrypt_byte(data: &BigUint, d: &BigUint, n: &BigUint) -> u64 {
-    let b: u64 = data.modpow(&d, &n).to_u64().unwrap();
+fn decrypt_byte(data: &BigUint, d: &BigUint, n: &BigUint) -> u8 {
+    let b: u8 = data.modpow(&d, &n).to_u8().unwrap();
     return b;
 }
 
-fn encrypt_data(data: Vec<u64>) -> Vec<BigUint> {
-    let encrypted_data: Vec<BigUint> = Vec::with_capacity(data.len());
+fn encrypt_data(data: &Vec<u32>, e: &BigUint, n: &BigUint) -> Vec<BigUint> {
+    let mut encrypted_data: Vec<BigUint> = Vec::with_capacity(data.len() * 4);
+    
+    for num in data {
+        let num = num.to_be_bytes();
+        for b in num {
+            encrypted_data.push(encrypt_byte(b, &e, &n));
+        }
+    }
 
     return encrypted_data;
 }
 
-fn encrypt(e: &BigUint, n: &BigUint) -> Result<(u64, Vec<BigUint>), &'static str> {
-    match input("What data to encrypt?\r\nNumber(s) / Text / File [n/t/f]?> ").unwrap().to_lowercase().trim() {
-        "n" => {
-            let numbers_text = input("> ").unwrap().trim();
-            let data: Vec<u64> = Vec::new();
-
-            s = 0
-            for i in 0..numbers_text.len() {
-                if 
-            }
-
-            match input("> ").unwrap().trim().parse::<u64>() {
-                Ok(num) => {
-                    return Ok((num, encrypt_byte(num, &e, &n)));
-                },
-                Err(_) => return Err("Not a number")
-            };
-        },
-        _ => return Err("Unknown action")
+fn decrypt_data(encrypted_data: &Vec<BigUint>, d: &BigUint, n: &BigUint) -> Vec<u32> {
+    let mut data: Vec<u32> = Vec::with_capacity(encrypted_data.len() / 4);
+    
+    for i in 0..data.capacity() {
+        let mut e_num = &encrypted_data[(i*4)..((i+1)*4)];
+        let mut num = [0u8; 4];
+        for i in 0..4 {
+            num[i] = decrypt_byte(&e_num[i], &d, &n);
+        }
+        data.push(u32::from_be_bytes(num));
     }
+
+    return data;
 }
 
-fn decrypt(encrypted_scalar_data: &BigUint, encrypted_data: &Vec<BigUint>, d: &BigUint, n: &BigUint) -> Result<u64, &'static str> {
-    match input("What data to decrypt?\r\nScalar / Array [s/a]?> ").unwrap().to_lowercase().trim() {
-        "s" => {
-            return Ok(decrypt_byte(encrypted_scalar_data, &e, &n));
-        },
-        _ => return Err("Unknown action")
-    }
-}
+// fn encrypt(e: &BigUint, n: &BigUint) -> Result<(u32, Vec<BigUint>), &'static str> {
+//     match input("What data to encrypt?\r\nNumber(s) / Text / File [n/t/f]?> ").unwrap().to_lowercase().trim() {
+//         "n" => {
+//             // let numbers_text = input("> ").unwrap().trim();
+//             // let data: Vec<u32> = Vec::new();
+//             //
+//             // s = 0;
+//             // for i in 0..numbers_text.len() {
+//             //     if 
+//             // }
+//
+//             match input("> ").unwrap().trim().parse::<u32>() {
+//                 Ok(num) => {
+//                     return Ok((num, encrypt_byte(num, &e, &n)));
+//                 },
+//                 Err(_) => return Err("Not a number")
+//             };
+//         },
+//         _ => return Err("Unknown action")
+//     }
+// }
+
+// fn decrypt(encrypted_scalar_data: &BigUint, encrypted_data: &Vec<BigUint>, d: &BigUint, n: &BigUint) -> Result<u32, &'static str> {
+//     match input("What data to decrypt?\r\nScalar / Array [s/a]?> ").unwrap().to_lowercase().trim() {
+//         "s" => {
+//             return Ok(decrypt_byte(encrypted_scalar_data, &e, &n));
+//         },
+//         _ => return Err("Unknown action")
+//     }
+// }
 
 fn main() {
     help(false);
@@ -261,9 +285,18 @@ fn main() {
                               } else { None }},
                               {if c {
                                   Some((&p, &q, &phi_n))
-                              } else { None }}, scalar_data, &data, &encrypted_scalar_data, &encrypted_data);
+                              } else { None }}, &data, &encrypted_data);
 
-                        println!("Done in {:.3?}", start.elapsed())
+                        println!("Done in {:.3?}", start.elapsed());
+
+                        let v = vec![115u32, 33u32 ,72u32 , 29u32, 19u32, 6u32, 67685u32];
+                        println!("{v:?}");
+                        
+                        let v = encrypt_data(&v, &e, &n);
+                        println!("{v:?}");
+
+                        let v = decrypt_data(&v, &d, &n);
+                        println!("{v:?}");
                     },
                     Err(_) => println!("Not a number")
                 }
@@ -317,21 +350,21 @@ fn main() {
                     _ => println!("Unknown action")
                 }
             },
-            "e" => {
-                if keys {
-                    match encrypt(&e, &n) {
-                        Ok((data_, encrypted_data_)) => {
-                            data = data_;
-                            encrypted_data = encrypted_data_.clone();
-                            println!("{}", data);
-                            println!("{}", encrypted_data);
-                        },
-                        Err(e) => println!("{e}")
-                    }
-                } else {
-                    println!("Generate or input keys first");
-                }
-            },
+            // "e" => {
+            //     if keys {
+            //         match encrypt(&e, &n) {
+            //             Ok((data_, encrypted_data_)) => {
+            //                 data = data_;
+            //                 encrypted_data = encrypted_data_.clone();
+            //                 println!("{}", data);
+            //                 println!("{}", encrypted_data);
+            //             },
+            //             Err(e) => println!("{e}")
+            //         }
+            //     } else {
+            //         println!("Generate or input keys first");
+            //     }
+            // },
             // "d" => decrypt(),
             "s" => show({if keys {
                            Some((&n, &e, &d))
