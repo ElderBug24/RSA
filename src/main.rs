@@ -105,12 +105,12 @@ fn input_integers<T: FromStr>(prompt: &str) -> Result<Vec<T>, &str> {
                 if s < i {
                     match T::from_str(&numbers_text[s..i]) {
                         Ok(num) => data.push(num),
-                        Err(_) => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and end")
+                        Err(_) => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and at the end")
                     }
                 }
                 s = i + 1;
             },
-            _ => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and end")
+            _ => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and at the end")
         }
 
         i += 1;
@@ -119,7 +119,7 @@ fn input_integers<T: FromStr>(prompt: &str) -> Result<Vec<T>, &str> {
     if s < i {
         match T::from_str(&numbers_text[s..i]) {
             Ok(num) => data.push(num),
-            Err(_) => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and end")
+            Err(_) => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and at the end")
         }
     }
 
@@ -484,8 +484,7 @@ fn main() {
             },
             "i" => {
                 match input("Input Keys or Initial numbers [i/k]?> ").unwrap().to_lowercase().trim() {
-                    "i" => {
-                        match input_integer::<BigUint>("p > ") {
+                    "i" => {                        match input_integer::<BigUint>("p > ") {
                             Ok(p_) => context.p = Some(p_),
                             Err(e) => {
                                 println!("{e}");
@@ -503,25 +502,31 @@ fn main() {
                         generate_keys(&mut context, 0u32);
                     },
                     "k" => {
-                        match input_integer::<BigUint>("e > ") { // make it an option so user can input only the keys he has
-                            Ok(e_) => context.e = Some(e_),
-                            Err(e) => {
-                                println!("{e}");
-                                continue;
+                        match input("e > ").unwrap().trim() {
+                            "" => {},
+                            text => {
+                                match BigUint::from_str(text) {
+                                    Ok(e) => context.e = Some(e),
+                                    Err(_) => println!("Not a number")
+                                }
                             }
                         }
-                        match input_integer::<BigUint>("d > ") {
-                            Ok(d_) => context.d = Some(d_),
-                            Err(e) => {
-                                println!("{e}");
-                                continue;
+                        match input("d > ").unwrap().trim() {
+                            "" => {},
+                            text => {
+                                match BigUint::from_str(text) {
+                                    Ok(d) => context.d = Some(d),
+                                    Err(_) => println!("Not a number")
+                                }
                             }
                         }
-                        match input_integer::<BigUint>("N > ") {
-                            Ok(n_) => context.n = Some(n_),
-                            Err(e) => {
-                                println!("{e}");
-                                continue;
+                        match input("N > ").unwrap().trim() {
+                            "" => {},
+                            text => {
+                                match BigUint::from_str(text) {
+                                    Ok(n) => context.n = Some(n),
+                                    Err(_) => println!("Not a number")
+                                }
                             }
                         }
                     },
