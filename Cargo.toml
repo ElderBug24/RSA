@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 gcd = "2.3.0"
+
 num-bigint = {version = "0.4", features = ["rand"] }
 num-traits = "0.2"
 num-primes = "0.3"

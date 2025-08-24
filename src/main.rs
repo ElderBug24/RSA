@@ -1,3 +1,4 @@
+use std::fmt;
 use std::io;
 use std::io::Write;
 use std::str::FromStr;
@@ -10,30 +11,51 @@ use num_integer::Integer;
 
 
 const K: u32 = 64;
-const SECURITY: u32 = 32;
+const SECURITY: u32 = 16;
 
 
 struct Context {
-    keys: bool,
-    c: bool,
-    p: BigUint,
-    q: BigUint,
-    n: BigUint,
-    phi_n: BigUint,
-    e: BigUint,
-    d: BigUint,
+    p: Option<BigUint>,
+    q: Option<BigUint>,
+    n: Option<BigUint>,
+    phi_n: Option<BigUint>,
+    e: Option<BigUint>,
+    d: Option<BigUint>,
     data: DataList,
-    encrypted_data: DataList,
+    encrypted_data: EncryptedDataList,
     decrypted_data: DataList
 }
 
-#[derive(Debug)]
 enum DataList {
     Numbers(Vec<BigUint>),
     Text(Vec<u32>),
-    FromNumbers(Vec<BigUint>),
-    FromText(Vec<BigUint>),
     Empty
+}
+
+enum EncryptedDataList {
+    EncryptedNumbers(Vec<BigUint>),
+    EncryptedText(Vec<BigUint>),
+    Empty
+}
+
+impl fmt::Display for DataList {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            DataList::Numbers(data) => write!(formatter, "{:?}", data),
+            DataList::Text(data) => write!(formatter, "\"{}\"", data.iter().map(|&code| char::from_u32(code).unwrap()).collect::<String>()),
+            DataList::Empty => write!(formatter, "[]")
+        }
+    }
+}
+
+impl fmt::Display for EncryptedDataList {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            EncryptedDataList::EncryptedNumbers(data) => write!(formatter, "{:?}", data),
+            EncryptedDataList::EncryptedText(data) => write!(formatter, "{:?}", data),
+            EncryptedDataList::Empty => write!(formatter, "[]")
+        }
+    }
 }
 
 fn input(prompt: &str) -> Result<String, &str> {
@@ -42,10 +64,10 @@ fn input(prompt: &str) -> Result<String, &str> {
     let _ = io::stdout().flush();
     match io::stdin().read_line(&mut s) {
         Ok(_) => {
-            if let Some('\n')=s.chars().next_back() {
+            if let Some('\n') = s.chars().next_back() {
                 s.pop();
             }
-            if let Some('\r')=s.chars().next_back() {
+            if let Some('\r') = s.chars().next_back() {
                 s.pop();
             }
             return Ok(s)
@@ -61,16 +83,58 @@ fn input_integer<T: FromStr>(prompt: &str) -> Result<T, &str> {
     }
 }
 
-fn is_probably_prime(n: &BigUint, k: u32) -> bool {
-    if n <= &BigUint::from(3u32) {
-        return *n == BigUint::from(2u32) || *n == BigUint::from(3u32);
+fn input_integers<T: FromStr>(prompt: &str) -> Result<Vec<T>, &str> {
+    let mut numbers_text = input(prompt).unwrap();
+    if let Some('[') = numbers_text.chars().next() {
+        numbers_text.remove(0);
     }
-    if n % 2u32 == BigUint::zero() {
+    if let Some(']') = numbers_text.chars().next_back() {
+        numbers_text.pop();
+    }
+
+    let mut data: Vec<T> = Vec::new();
+
+    let mut i = 0usize;
+    let mut s = 0usize;
+
+    for c in numbers_text.chars() {
+        match c {
+            '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9' => {},
+            '_' => {},
+            ' '|',' => {
+                if s < i {
+                    match T::from_str(&numbers_text[s..i]) {
+                        Ok(num) => data.push(num),
+                        Err(_) => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and end")
+                    }
+                }
+                s = i + 1;
+            },
+            _ => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and end")
+        }
+
+        i += 1;
+    }
+
+    if s < i {
+        match T::from_str(&numbers_text[s..i]) {
+            Ok(num) => data.push(num),
+            Err(_) => return Err("Please input one or more numbers seperated by spaces and/or commas, brackets are allowed at the start and end")
+        }
+    }
+
+    return Ok(data);
+}
+
+fn is_probably_prime(num: &BigUint, k: u32) -> bool {
+    if num <= &BigUint::from(3u32) {
+        return *num == BigUint::from(2u32) || *num == BigUint::from(3u32);
+    }
+    if num % 2u32 == BigUint::zero() {
         return false;
     }
 
-    // write n−1 as 2^r * d
-    let mut d = n - 1u32;
+    let mut d = num - 1u32;
     let mut r = 0;
     while &d % 2u32 == BigUint::zero() {
         d /= 2u32;
@@ -80,40 +144,24 @@ fn is_probably_prime(n: &BigUint, k: u32) -> bool {
     let mut rng = rand::thread_rng();
 
     'witness_loop: for _ in 0..k {
-        let a = rng.gen_biguint_range(&BigUint::from(2u32), &(n - 2u32));
-        let mut x = a.modpow(&d, n);
+        let a = rng.gen_biguint_range(&BigUint::from(2u32), &(num - 2u32));
+        let mut x = a.modpow(&d, num);
 
-        if x == One::one() || x == n - 1u32 {
+        if x == One::one() || x == num - 1u32 {
             continue 'witness_loop;
         }
 
         for _ in 0..r - 1 {
-            x = x.modpow(&BigUint::from(2u32), n);
-            if x == n - 1u32 {
+            x = x.modpow(&BigUint::from(2u32), num);
+            if x == num - 1u32 {
                 continue 'witness_loop;
             }
         }
 
-        return false; // composite
+        return false;
     }
 
-    true // probably prime
-}
-
-fn biguint_pow(base: &BigUint, exponent: &BigUint) -> BigUint {
-    let mut result = BigUint::one();
-    let mut current_base = base.clone();
-    let mut current_exponent = exponent.clone();
-
-    while &current_exponent > &BigUint::zero() {
-        if &current_exponent % &2u32 == BigUint::one() {
-            result *= &current_base;
-        }
-        current_base = &current_base * &current_base;
-        current_exponent /= 2u32;
-    }
-
-    return result;
+    return true;
 }
 
 fn modinv(a: &BigUint, m: &BigUint) -> Option<BigUint> {
@@ -130,10 +178,9 @@ fn modinv(a: &BigUint, m: &BigUint) -> Option<BigUint> {
     }
 
     if mn.0 != BigInt::one() {
-        return None; // no inverse
+        return None;
     }
 
-    // make sure result is positive
     while xy.0 < BigInt::zero() {
         xy.0 += &m;
     }
@@ -164,8 +211,8 @@ fn test_keys(context: &Context) -> bool {
     let mut rng = rand::thread_rng();
     let mut failed = false;
 
-    let mut random: Box<dyn FnMut() -> u32> = if &context.n <= &BigUint::from(u32::MAX) {
-        Box::new(move || rng.gen_biguint_below(&context.phi_n).to_u32().unwrap())
+    let mut random: Box<dyn FnMut() -> u32> = if context.n.as_ref().unwrap() <= &BigUint::from(u32::MAX) {
+        Box::new(move || rng.gen_biguint_below(context.phi_n.as_ref().unwrap()).to_u32().unwrap())
     } else {
         Box::new(move || rng.gen_range(2..u32::MAX))
     };
@@ -174,8 +221,8 @@ fn test_keys(context: &Context) -> bool {
         let num1 = random();
         let num2 = random();
         let numv = vec![num1, num2];
-        let e_numv = encrypt_bytes(&numv, &context.e, &context.n);
-        let d_nums = decrypt_bytes(&e_numv, &context.d, &context.n);
+        let e_numv = encrypt_bytes(&numv, &context.e.as_ref().unwrap(), &context.n.as_ref().unwrap());
+        let d_nums = decrypt_bytes(&e_numv, &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap());
 
         failed |= num1 != d_nums[0];
         failed |= num2 != d_nums[1];
@@ -184,20 +231,26 @@ fn test_keys(context: &Context) -> bool {
     return failed;
 }
 
-fn generate_keys(context: &mut Context, size: u32, c: bool) {
+fn generate_keys(context: &mut Context, size: u32) {
     let mut rng = rand::thread_rng();
 
     let p: BigUint;
     let q: BigUint;
 
-    if c {
-        let upper_bound = /* BigUint::one() * */ BigUint::from(10u32).pow(size);
+    let upper_bound = BigUint::from(10u32).pow(size);
+
+    if context.p.is_none()  {
         p = loop {
             let num = rng.gen_biguint_below(&upper_bound);
             if is_probably_prime(&num, K) {
                 break num;
             }
         };
+    } else {
+        p = context.p.clone().unwrap();
+    }
+
+    if context.q.is_none() {
         q = loop {
             let num = rng.gen_biguint_below(&upper_bound);
             if is_probably_prime(&num, K) {
@@ -205,8 +258,7 @@ fn generate_keys(context: &mut Context, size: u32, c: bool) {
             }
         };
     } else {
-        p = context.p.clone();
-        q = context.q.clone();
+        q = context.q.clone().unwrap();
     }
 
     let n = &p * &q;
@@ -229,43 +281,29 @@ fn generate_keys(context: &mut Context, size: u32, c: bool) {
         d += &phi_n;
     }
 
-    context.p = p;
-    context.q = q;
-    context.n = n;
-    context.phi_n = phi_n;
-    context.e = e;
-    context.d = d;
+    context.p = Some(p);
+    context.q = Some(q);
+    context.n = Some(n);
+    context.phi_n = Some(phi_n);
+    context.e = Some(e);
+    context.d = Some(d);
 
     if test_keys(&context) {
         panic!("Failed!");
-    }
+    } 
 }
 
 fn show(context: &Context) {
-    if context.c {
-        println!("p: {}", context.p);
-        println!("q: {}", context.q);
-        println!("Phi(N): {}", context.phi_n);
-    }
-    if context.keys {
-        println!("e: {}", context.e);
-        println!("d: {}", context.d);
-        println!("N: {}", context.n);
-    }
+    if let Some(num) = &context.p { println!("p: {num}"); }
+    if let Some(num) = &context.q { println!("q: {num}"); }
+    if let Some(num) = &context.n { println!("N: {num}"); }
+    if let Some(num) = &context.phi_n { println!("Phi(N): {num}"); }
+    if let Some(num) = &context.e { println!("e: {num}"); }
+    if let Some(num) = &context.d { println!("d: {num}"); }
 
-    match &context.data {
-        DataList::Numbers(data) => println!("Data: {:?}", data),
-        DataList::Text(data) => println!("Data: \"{}\"", data.iter().map(|&code| char::from_u32(code).unwrap()).collect::<String>()),
-        DataList::Empty => {},
-        _ => panic!(" ")
-    }
-    if let DataList::Empty = context.encrypted_data {} else { println!("Encrypted Data: {:?}", context.encrypted_data) }
-    match &context.decrypted_data {
-        DataList::Numbers(data) => println!("Decrypted Data: {:?}", data),
-        DataList::Text(data) => println!("Decrypted Data: \"{}\"", data.iter().map(|&code| char::from_u32(code).unwrap()).collect::<String>()),
-        DataList::Empty => {},
-        _ => panic!(" ")
-    }
+    println!("Data: {}", context.data);
+    println!("Encrypted Data: {}", context.encrypted_data);
+    println!("Decrypted Data: {}", context.decrypted_data);
 
 }
 
@@ -294,7 +332,7 @@ fn encrypt_bytes(data: &Vec<u32>, e: &BigUint, n: &BigUint) -> Vec<BigUint> {
 
 fn decrypt_bytes(encrypted_data: &Vec<BigUint>, d: &BigUint, n: &BigUint) -> Vec<u32> {
     let mut data: Vec<u32> = Vec::with_capacity(encrypted_data.len() / 4);
-    
+
     for i in 0..data.capacity() {
         let e_num = &encrypted_data[(i*4)..((i+1)*4)];
         let mut num = [0u8; 4];
@@ -307,7 +345,7 @@ fn decrypt_bytes(encrypted_data: &Vec<BigUint>, d: &BigUint, n: &BigUint) -> Vec
     return data;
 }
 
-fn encrypt_data(data: &DataList, e: &BigUint, n: &BigUint) -> DataList {
+fn encrypt_data(data: &DataList, e: &BigUint, n: &BigUint) -> EncryptedDataList {
     match data {
         DataList::Numbers(data) => {
             let mut encrypted_data: Vec<BigUint> = Vec::with_capacity(data.len());
@@ -316,18 +354,16 @@ fn encrypt_data(data: &DataList, e: &BigUint, n: &BigUint) -> DataList {
                 encrypted_data.push(num.modpow(&e, &n));
             }
 
-            return DataList::FromNumbers(encrypted_data);
+            return EncryptedDataList::EncryptedNumbers(encrypted_data);
         },
-        DataList::Text(data) => {
-            return DataList::FromText(encrypt_bytes(&data, &e, &n));
-        },
-        _ => panic!(" ")
+        DataList::Text(data) => return EncryptedDataList::EncryptedText(encrypt_bytes(&data, &e, &n)),
+        DataList::Empty => return EncryptedDataList::Empty
     }
 }
 
-fn decrypt_data(encrypted_data: &DataList, d: &BigUint, n: &BigUint) -> DataList {
+fn decrypt_data(encrypted_data: &EncryptedDataList, d: &BigUint, n: &BigUint) -> DataList {
     match encrypted_data {
-        DataList::FromNumbers(encrypted_data) => {
+        EncryptedDataList::EncryptedNumbers(encrypted_data) => {
             let mut data: Vec<BigUint> = Vec::with_capacity(encrypted_data.len());
 
             for num in encrypted_data {
@@ -336,53 +372,29 @@ fn decrypt_data(encrypted_data: &DataList, d: &BigUint, n: &BigUint) -> DataList
 
             return DataList::Numbers(data);
         },
-        DataList::FromText(data) => {
-            return DataList::Text(decrypt_bytes(&data, &d, &n));
-        }
-        _ => panic!(" ")
+        EncryptedDataList::EncryptedText(data) => return DataList::Text(decrypt_bytes(&data, &d, &n)),
+        EncryptedDataList::Empty => return DataList::Empty
     }
 }
 
 fn encrypt(context: &mut Context) {
     match input("What data to encrypt?\r\nNumber(s) / Text / File / Already stored data [n/t/f/s]?> ").unwrap().to_lowercase().trim() {
         "n" => {
-            let text_ = input("> ").unwrap();
-            let numbers_text = text_.trim();
-            let mut data: Vec<BigUint> = Vec::new();
-
-            let mut temp = BigUint::zero();
-            let mut temp_= BigInt::from(-1i32);
-
-            for c in numbers_text.chars().rev() {
-                match c {
-                    '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9' => {
-                        temp_ += BigInt::one();
-                        temp += BigUint::from(c as u8 - b'0') * biguint_pow(&BigUint::from(10u32), &temp_.to_biguint().unwrap());
-                    },
-                    ' ' => {
-                        if &temp_ >= &BigInt::zero() {
-                            data.push(temp);
-                            temp = BigUint::zero();
-                            temp_ = BigInt::from(-1i32);
-                        }
-                    },
-                    _ => {
-                        println!("Please input one or more numbers seperated by spaces");
-                        return;
-                    }
+            match input_integers::<BigUint>("> ") {
+                Ok(data) => context.data = DataList::Numbers(data),
+                Err(e) => {
+                    println!("{e}");
+                    return;
                 }
             }
-
-            if &temp_ >= &BigInt::zero() {
-                data.push(temp);
-            }
-
-            data.reverse();
-            context.data = DataList::Numbers(data);
         },
         "t" => {
             let text_ = input("> ").unwrap();
             context.data = DataList::Text(text_.trim().chars().map(|c| c as u32).collect::<Vec<u32>>());
+        },
+        "f" => {
+            println!("Not yet implemented!");
+            return;
         }
         "s" => {},
         "" => return,
@@ -392,57 +404,77 @@ fn encrypt(context: &mut Context) {
         }
     }
 
-    context.encrypted_data = encrypt_data(&context.data, &context.e, &context.n);
-    println!("{:?}", context.encrypted_data);
+    context.encrypted_data = encrypt_data(&context.data, &context.e.as_ref().unwrap(), &context.n.as_ref().unwrap());
+    println!("{}", context.encrypted_data);
 }
 
 fn decrypt(context: &mut Context) {
     match input("What data to decrypt?\r\nNumber(s) / Text / File / Already stored encrypted data [n/t/f/s]?> ").unwrap().to_lowercase().trim() {
-        "s" => {
-            context.decrypted_data = decrypt_data(&context.encrypted_data, &context.d, &context.n);
-            println!("{:?}", context.decrypted_data);
+        "n" => match input_integers::<BigUint>("> ") {
+            Ok(data) => {
+                context.encrypted_data = EncryptedDataList::EncryptedNumbers(data);
+            },
+            Err(e) => {
+                println!("{e}");
+                return;
+            }
+        },
+        "t" => match input_integers::<BigUint>("> ") {
+            Ok(data) => {
+                context.encrypted_data = EncryptedDataList::EncryptedText(data);
+            },
+            Err(e) => {
+                println!("{e}");
+                return;
+            }
+        },
+        "f" => {
+            println!("Not yet implemented!");
+            return;
         }
+        "s" => {
+            if let EncryptedDataList::Empty = context.encrypted_data {
+                println!("Encrypt Data first");
+                return;
+            }
+        },
+        "" => return,
         _ => {
             println!("Unknown action");
             return;
         }
     }
 
-    match &context.decrypted_data {
-        DataList::Numbers(data) => println!("{:?}", data),
-        DataList::Text(data) => println!("\"{}\"", data.iter().map(|&code| char::from_u32(code).unwrap()).collect::<String>()),
-        _ => panic!(" ")
-    }
+    context.decrypted_data = decrypt_data(&context.encrypted_data, &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap());
+    println!("{}", context.decrypted_data);
 }
 
 fn main() {
     help(false);
 
     let mut context = Context {
-        keys: false,
-        c: false,
         data: DataList::Empty,
-        encrypted_data: DataList::Empty,
+        encrypted_data: EncryptedDataList::Empty,
         decrypted_data: DataList::Empty,
-        p: BigUint::zero(),
-        q: BigUint::zero(),
-        n: BigUint::zero(),
-        phi_n: BigUint::zero(),
-        e: BigUint::zero(),
-        d: BigUint::zero()
+        p: None,
+        q: None,
+        n: None,
+        phi_n: None,
+        e: None,
+        d: None
     };
 
     loop {
-        match input("\n[g/i/e/d/s/h/q]?> ").unwrap().to_lowercase().trim() {
+        match input("\n[g/i/e/d/s/o/h/q]?> ").unwrap().to_lowercase().trim() {
             "g" => {
                 match input("Enter key size (10^n) > ").unwrap().trim().parse::<u32>() {
                     Ok(size) => {
                         let start = Instant::now();
 
-                        generate_keys(&mut context, size, true);
+                        context.p = None;
+                        context.q = None;
+                        generate_keys(&mut context, size);
 
-                        context.keys = true;
-                        context.c = true;
                         show(&context);
 
                         println!("Done in {:.3?}", start.elapsed());
@@ -454,68 +486,64 @@ fn main() {
                 match input("Input Keys or Initial numbers [i/k]?> ").unwrap().to_lowercase().trim() {
                     "i" => {
                         match input_integer::<BigUint>("p > ") {
-                            Ok(p_) => context.p = p_,
+                            Ok(p_) => context.p = Some(p_),
                             Err(e) => {
                                 println!("{e}");
-                                return;
+                                continue;
                             }
                         }
                         match input_integer::<BigUint>("q > ") {
-                            Ok(q_) => context.q = q_,
+                            Ok(q_) => context.q = Some(q_),
                             Err(e) => {
                                 println!("{e}");
-                                return;
+                                continue;
                             }
                         }
 
-                        context.c = true;
-                        generate_keys(&mut context, 0u32, false);
-                        context.keys = true;
+                        generate_keys(&mut context, 0u32);
                     },
                     "k" => {
-                        match input_integer::<BigUint>("e > ") {
-                            Ok(e_) => context.e = e_,
+                        match input_integer::<BigUint>("e > ") { // make it an option so user can input only the keys he has
+                            Ok(e_) => context.e = Some(e_),
                             Err(e) => {
                                 println!("{e}");
-                                return;
+                                continue;
                             }
                         }
                         match input_integer::<BigUint>("d > ") {
-                            Ok(d_) => context.d = d_,
+                            Ok(d_) => context.d = Some(d_),
                             Err(e) => {
                                 println!("{e}");
-                                return;
+                                continue;
                             }
                         }
                         match input_integer::<BigUint>("N > ") {
-                            Ok(n_) => context.n = n_,
+                            Ok(n_) => context.n = Some(n_),
                             Err(e) => {
                                 println!("{e}");
-                                return;
+                                continue;
                             }
                         }
-
-                        context.keys = true;
-                        context.c = false;
                     },
                     _ => println!("Unknown action")
                 }
             },
             "e" => {
-                if context.keys {
-                    encrypt(&mut context)
-                } else {
+                if context.e.is_none() || context.n.is_none() {
                     println!("Generate or input keys first");
+                } else {
+                    encrypt(&mut context);
                 }
             },
             "d" => {
-                if context.keys {
-                    decrypt(&mut context)
-                } else {
+                if context.d.is_none() || context.n.is_none() {
                     println!("Generate or input keys first");
+                } else {
+                    decrypt(&mut context);
                 }
             }
             "s" =>  show(&context),
+            "o" => println!("Not implemented yet!"),
             "h" => help(true),
             "q" => return,
             "" => {},
