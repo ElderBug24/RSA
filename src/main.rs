@@ -10,7 +10,7 @@ use num_traits::{One, Zero, ToPrimitive};
 use num_integer::Integer;
 
 
-const K: u32 = 64;
+const K: u32 = 256;
 const SECURITY: u32 = 16;
 
 
@@ -99,8 +99,7 @@ fn input_integers<T: FromStr>(prompt: &str) -> Result<Vec<T>, &str> {
 
     for c in numbers_text.chars() {
         match c {
-            '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9' => {},
-            '_' => {},
+            '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'_' => {},
             ' '|',' => {
                 if s < i {
                     match T::from_str(&numbers_text[s..i]) {
@@ -164,6 +163,16 @@ fn is_probably_prime(num: &BigUint, k: u32) -> bool {
     return true;
 }
 
+fn generate_prime_below(upper_bound: &BigUint) -> BigUint {
+    let mut rng = rand::thread_rng();
+    loop {
+        let num = rng.gen_biguint_below(upper_bound);
+        if is_probably_prime(&num, K) {
+            break num;
+        }
+    }
+}
+
 fn modinv(a: &BigUint, m: &BigUint) -> Option<BigUint> {
     let a = a.to_bigint().unwrap();
     let m = m.to_bigint().unwrap();
@@ -218,17 +227,19 @@ fn test_keys(context: &Context) -> bool {
     };
 
     for _ in 0..SECURITY {
-        let num1 = random();
-        let num2 = random();
+        let (num1, num2) = (random(), random());
         let numv = vec![num1, num2];
         let e_numv = encrypt_bytes(&numv, &context.e.as_ref().unwrap(), &context.n.as_ref().unwrap());
         let d_nums = decrypt_bytes(&e_numv, &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap());
 
-        failed |= num1 != d_nums[0];
-        failed |= num2 != d_nums[1];
+        failed |= num1 != d_nums[0] || num2 != d_nums[1];
+
+        if failed {
+            return true;
+        }
     }
 
-    return failed;
+    return false;
 }
 
 fn generate_keys(context: &mut Context, size: u32) {
@@ -240,23 +251,13 @@ fn generate_keys(context: &mut Context, size: u32) {
     let upper_bound = BigUint::from(10u32).pow(size);
 
     if context.p.is_none()  {
-        p = loop {
-            let num = rng.gen_biguint_below(&upper_bound);
-            if is_probably_prime(&num, K) {
-                break num;
-            }
-        };
+        p = generate_prime_below(&upper_bound);
     } else {
         p = context.p.clone().unwrap();
     }
 
     if context.q.is_none() {
-        q = loop {
-            let num = rng.gen_biguint_below(&upper_bound);
-            if is_probably_prime(&num, K) {
-                break num;
-            }
-        };
+        q = generate_prime_below(&upper_bound);
     } else {
         q = context.q.clone().unwrap();
     }
@@ -548,7 +549,7 @@ fn main() {
                 }
             }
             "s" =>  show(&context),
-            "o" => println!("Not implemented yet!"),
+            "o" => println!("Not yet implemented!"),
             "h" => help(true),
             "q" => return,
             "" => {},
