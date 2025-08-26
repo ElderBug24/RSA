@@ -1,12 +1,13 @@
 use std::fmt;
 use std::io;
-use std::io::Write;
+use std::io::{Write, Read};
+use std::fs;
 use std::str::FromStr;
 use std::time::Instant;
 
 use rand::Rng;
 use num_bigint::{BigUint, RandBigInt, BigInt, ToBigInt};
-use num_traits::{One, Zero, ToPrimitive};
+use num_traits::{One, Zero, ToPrimitive, ToBytes};
 use num_integer::Integer;
 
 
@@ -64,12 +65,8 @@ fn input(prompt: &str) -> Result<String, &str> {
     let _ = io::stdout().flush();
     match io::stdin().read_line(&mut s) {
         Ok(_) => {
-            if let Some('\n') = s.chars().next_back() {
-                s.pop();
-            }
-            if let Some('\r') = s.chars().next_back() {
-                s.pop();
-            }
+            if let Some('\n') = s.chars().next_back() { s.pop(); }
+            if let Some('\r') = s.chars().next_back() { s.pop(); }
             return Ok(s)
     },
         Err(_) => return Err("Failed to read line")
@@ -85,12 +82,8 @@ fn input_integer<T: FromStr>(prompt: &str) -> Result<T, &str> {
 
 fn input_integers<T: FromStr>(prompt: &str) -> Result<Vec<T>, &str> {
     let mut numbers_text = input(prompt).unwrap();
-    if let Some('[') = numbers_text.chars().next() {
-        numbers_text.remove(0);
-    }
-    if let Some(']') = numbers_text.chars().next_back() {
-        numbers_text.pop();
-    }
+    if let Some('[') = numbers_text.chars().next() { numbers_text.remove(0); }
+    if let Some(']') = numbers_text.chars().next_back() { numbers_text.pop(); }
 
     let mut data: Vec<T> = Vec::new();
 
@@ -123,6 +116,33 @@ fn input_integers<T: FromStr>(prompt: &str) -> Result<Vec<T>, &str> {
     }
 
     return Ok(data);
+}
+
+fn write_file(filename: &str, data: &[u8]) -> Result<(), &'static str> {
+    let mut file = match fs::File::create(filename) {
+        Ok(file) => file,
+        Err(_) => return Err("Failed to open file")
+    };
+    
+    match file.write_all(data) {
+        Ok(_) => Ok(()),
+        Err(_) => Err("Failed to write to file")
+    }
+}
+
+fn read_file(filename: &str) -> Result<String, &str> {
+    let file = match fs::File::open(filename) {
+        Ok(file) => file,
+        Err(_) => return Err("Failed to open file")
+    };
+
+    let mut buf_reader = io::BufReader::new(file);
+    let mut contents = String::new();
+
+    match buf_reader.read_to_string(&mut contents) {
+        Ok(_) => Ok(contents),
+        Err(_) => Err("Failed to read file")
+    }
 }
 
 fn is_probably_prime(num: &BigUint, k: u32) -> bool {
@@ -229,8 +249,8 @@ fn test_keys(context: &Context) -> bool {
     for _ in 0..SECURITY {
         let (num1, num2) = (random(), random());
         let numv = vec![num1, num2];
-        let e_numv = encrypt_bytes(&numv, &context.e.as_ref().unwrap(), &context.n.as_ref().unwrap());
-        let d_nums = decrypt_bytes(&e_numv, &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap());
+        let e_numv = encrypt_bytes(&numv, context.e.as_ref().unwrap(), context.n.as_ref().unwrap());
+        let d_nums = decrypt_bytes(&e_numv, context.d.as_ref().unwrap(), context.n.as_ref().unwrap());
 
         failed |= num1 != d_nums[0] || num2 != d_nums[1];
 
@@ -390,13 +410,20 @@ fn encrypt(context: &mut Context) {
             }
         },
         "t" => {
-            let text_ = input("> ").unwrap();
-            context.data = DataList::Text(text_.trim().chars().map(|c| c as u32).collect::<Vec<u32>>());
+            let text = input("> ").unwrap();
+            context.data = DataList::Text(text.trim().chars().map(|c| c as u32).collect::<Vec<u32>>());
         },
         "f" => {
-            println!("Not yet implemented!");
-            return;
-        }
+            let text = match read_file(&input("Filename > ").unwrap()) {
+                Ok(contents) => contents,
+                Err(e) => {
+                    println!("{e}");
+                    return;
+                }
+            };
+
+            todo!();
+        },
         "s" => {},
         "" => return,
         _ => {
@@ -405,7 +432,7 @@ fn encrypt(context: &mut Context) {
         }
     }
 
-    context.encrypted_data = encrypt_data(&context.data, &context.e.as_ref().unwrap(), &context.n.as_ref().unwrap());
+    context.encrypted_data = encrypt_data(&context.data, context.e.as_ref().unwrap(), context.n.as_ref().unwrap());
     println!("{}", context.encrypted_data);
 }
 
@@ -446,7 +473,7 @@ fn decrypt(context: &mut Context) {
         }
     }
 
-    context.decrypted_data = decrypt_data(&context.encrypted_data, &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap());
+    context.decrypted_data = decrypt_data(&context.encrypted_data, context.d.as_ref().unwrap(), context.n.as_ref().unwrap());
     println!("{}", context.decrypted_data);
 }
 
@@ -466,7 +493,7 @@ fn main() {
     };
 
     loop {
-        match input("\n[g/i/e/d/s/o/h/q]?> ").unwrap().to_lowercase().trim() {
+        match input("\r\n[g/i/e/d/s/o/h/q]?> ").unwrap().to_lowercase().trim() {
             "g" => {
                 match input("Enter key size (10^n) > ").unwrap().trim().parse::<u32>() {
                     Ok(size) => {
@@ -485,7 +512,8 @@ fn main() {
             },
             "i" => {
                 match input("Input Keys or Initial numbers [i/k]?> ").unwrap().to_lowercase().trim() {
-                    "i" => {                        match input_integer::<BigUint>("p > ") {
+                    "i" => {                        
+                        match input_integer::<BigUint>("p > ") {
                             Ok(p_) => context.p = Some(p_),
                             Err(e) => {
                                 println!("{e}");
@@ -549,7 +577,62 @@ fn main() {
                 }
             }
             "s" =>  show(&context),
-            "o" => println!("Not yet implemented!"),
+            "o" => {
+                let data: String = match (|| -> Result<String, &str> {
+                    return Ok( match input("What do you want to export?\r\n[p/q/n/phi_n/e/d/data/edata/ddata]?> ").unwrap().to_lowercase().trim() {
+                        num@("p"|"q"|"n"|"phi_n"|"e"|"d") => {
+                            let n: &BigUint = match num {
+                                "p" => if let Some(ref p) = context.p { p } else { return Err("Not set yet"); }
+                                "q" => if let Some(ref q) = context.q { q } else { return Err("Not set yet"); }
+                                "N" => if let Some(ref n) = context.n { n } else { return Err("Not set yet"); }
+                                "phi_n" => if let Some(ref phi_n) = context.phi_n { phi_n } else { return Err("Not set yet"); }
+                                "e" => if let Some(ref e) = context.e { e } else { return Err("Not set yet"); }
+                                "d" => if let Some(ref d) = context.d { d } else { return Err("Not set yet"); }
+                                _ => return Err("")
+                            };
+
+                            format!("{n}\n")
+                        },
+                        list@("data"|"edata"|"ddata") => {
+                            let l: &Vec<BigUint> = match list {
+                                l@("data"|"ddata") => {
+                                    match match l {
+                                        "data" => &context.data,
+                                        "ddata" => &context.decrypted_data,
+                                        _ => return Err("")
+                                    } {
+                                        DataList::Numbers(l) => &l,
+                                        DataList::Text(l) => &l.into_iter().map(|n| BigUint::from(*n)).collect(),
+                                        DataList::Empty => &Vec::with_capacity(0)
+                                    }
+                                },
+                                "edata" => match &context.encrypted_data {
+                                    EncryptedDataList::EncryptedNumbers(l)|EncryptedDataList::EncryptedText(l) => &l,
+                                    EncryptedDataList::Empty => &Vec::with_capacity(0)
+                                },
+                                _ => return Err("")
+                            };
+
+                            let mut s = String::new();
+                            for num in l { s.push_str(&format!("{num}\n")); }
+
+                            s
+                        }
+                        _ => return Err("Unknown action")
+                    } );
+                })() {
+                    Ok(data) => data,
+                    Err(e) => {
+                        println!("{e}");
+                        continue;
+                    }
+                };
+
+                match write_file(&input("Filename > ").unwrap(), &data.into_bytes()) {
+                    Ok(_) => {},
+                    Err(e) => println!("{e}")
+                }
+            },
             "h" => help(true),
             "q" => return,
             "" => {},
