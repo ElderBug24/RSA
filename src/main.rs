@@ -594,27 +594,25 @@ fn main() {
                             format!("{n}\n")
                         },
                         list@("data"|"edata"|"ddata") => {
-                            let l: &Vec<BigUint> = match list {
+                            let mut s = String::new();
+                            match list {
                                 l@("data"|"ddata") => {
                                     match match l {
                                         "data" => &context.data,
                                         "ddata" => &context.decrypted_data,
                                         _ => return Err("")
                                     } {
-                                        DataList::Numbers(l) => &l,
-                                        DataList::Text(l) => &l.into_iter().map(|n| BigUint::from(*n)).collect(),
-                                        DataList::Empty => &Vec::with_capacity(0)
+                                        DataList::Numbers(l) => for num in l { s.push_str(&format!("{num}\n")); },
+                                        DataList::Text(l) => for num in l { s.push_str(&format!("{num}\n")); },
+                                        DataList::Empty => {}
                                     }
                                 },
                                 "edata" => match &context.encrypted_data {
-                                    EncryptedDataList::EncryptedNumbers(l)|EncryptedDataList::EncryptedText(l) => &l,
-                                    EncryptedDataList::Empty => &Vec::with_capacity(0)
+                                    EncryptedDataList::EncryptedNumbers(l)|EncryptedDataList::EncryptedText(l) => for num in l { s.push_str(&format!("{num}\n")); },
+                                    EncryptedDataList::Empty => {}
                                 },
                                 _ => return Err("")
                             };
-
-                            let mut s = String::new();
-                            for num in l { s.push_str(&format!("{num}\n")); }
 
                             s
                         }
