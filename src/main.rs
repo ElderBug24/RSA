@@ -9,10 +9,10 @@ use rand::Rng;
 use num_bigint::{BigUint, RandBigInt, BigInt, ToBigInt};
 use num_traits::{One, Zero, ToPrimitive, ToBytes};
 use num_integer::Integer;
+use num_primes;
 
 
-const K: u32 = 256;
-const SECURITY: u32 = 16;
+const SECURITY: u32 = 8;
 
 
 struct Context {
@@ -73,6 +73,23 @@ fn input(prompt: &str) -> Result<String, &str> {
     }
 }
 
+fn parse_integer<T: FromStr>(text: &str) -> Result<T, ()> {
+    let mut text_ = String::new();
+
+    for c in text.chars() {
+        match c {
+            n@('0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9') => text_.push(n),
+            '_'|'.'|','|' ' => {},
+            _ => return Err(())
+        }
+    }
+
+    match T::from_str(&text_) {
+        Ok(num) => Ok(num),
+        Err(_) => Err(())
+    }
+}
+
 fn parse_integers<T: FromStr>(mut text: String) -> Result<Vec<T>, ()> {
     if let Some('[') = text.chars().next() { text.remove(0); }
     if let Some(']') = text.chars().next_back() { text.pop(); }
@@ -87,7 +104,7 @@ fn parse_integers<T: FromStr>(mut text: String) -> Result<Vec<T>, ()> {
             '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'_' => {},
             ' '|','|'\n' => {
                 if s < i {
-                    match T::from_str(&text[s..i]) {
+                    match parse_integer::<T>(&text[s..i]) {
                         Ok(num) => data.push(num),
                         Err(_) => return Err(())
                     }
@@ -111,7 +128,7 @@ fn parse_integers<T: FromStr>(mut text: String) -> Result<Vec<T>, ()> {
 }
 
 fn input_integer<T: FromStr>(prompt: &str) -> Result<T, &str> {
-    match T::from_str(&input(prompt).unwrap()) {
+    match parse_integer::<T>(&input(prompt).unwrap()) {
         Ok(num) => Ok(num),
         Err(_) => Err("Error: Not a number")
     }
@@ -153,54 +170,6 @@ fn read_file(filename: &str) -> Result<String, &str> {
     }
 }
 
-fn is_probably_prime(num: &BigUint, k: u32) -> bool {
-    if num <= &BigUint::from(3u32) {
-        return *num == BigUint::from(2u32) || *num == BigUint::from(3u32);
-    }
-    if num % 2u32 == BigUint::zero() {
-        return false;
-    }
-
-    let mut d = num - 1u32;
-    let mut r = 0;
-    while &d % 2u32 == BigUint::zero() {
-        d /= 2u32;
-        r += 1;
-    }
-
-    let mut rng = rand::thread_rng();
-
-    'witness_loop: for _ in 0..k {
-        let a = rng.gen_biguint_range(&BigUint::from(2u32), &(num - 2u32));
-        let mut x = a.modpow(&d, num);
-
-        if x == One::one() || x == num - 1u32 {
-            continue 'witness_loop;
-        }
-
-        for _ in 0..r - 1 {
-            x = x.modpow(&BigUint::from(2u32), num);
-            if x == num - 1u32 {
-                continue 'witness_loop;
-            }
-        }
-
-        return false;
-    }
-
-    return true;
-}
-
-fn generate_prime_below(upper_bound: &BigUint) -> BigUint {
-    let mut rng = rand::thread_rng();
-    loop {
-        let num = rng.gen_biguint_below(upper_bound);
-        if is_probably_prime(&num, K) {
-            break num;
-        }
-    }
-}
-
 fn modinv(a: &BigUint, m: &BigUint) -> Option<BigUint> {
     let a = a.to_bigint().unwrap();
     let m = m.to_bigint().unwrap();
@@ -225,31 +194,12 @@ fn modinv(a: &BigUint, m: &BigUint) -> Option<BigUint> {
     return Some(xy.0.to_biguint().unwrap());
 }
 
-fn help(verbose: bool) {
-    println!();
-    println!("RSA asymetrical data encryption");
-    if verbose {
-        println!();
-        println!("g: Generate keys");
-        println!("i: Input keys / initial numbers to generate the keys");
-        println!("e: Encrypt data");
-        println!("d: Decrypt data");
-        println!("s: Show saved variables");
-        println!("f: Import or Export data");
-        println!("h: Show this help");
-        println!("q: Quit");
-    } else {
-        println!();
-        println!("Type 'h' for help");
-    }
-}
-
-fn test_keys(context: &Context) -> bool {
+fn test_keys(e: &BigUint, d: &BigUint, n: &BigUint) -> bool {
     let mut rng = rand::thread_rng();
     let mut failed = false;
 
-    let mut random: Box<dyn FnMut() -> u32> = if context.n.as_ref().unwrap() <= &BigUint::from(u32::MAX) {
-        Box::new(move || rng.gen_biguint_below(context.phi_n.as_ref().unwrap()).to_u32().unwrap())
+    let mut random: Box<dyn FnMut() -> u32> = if n <= &BigUint::from(u32::MAX) {
+        Box::new(move || rng.gen_biguint_below(n).to_u32().unwrap())
     } else {
         Box::new(move || rng.gen_range(2..u32::MAX))
     };
@@ -257,8 +207,8 @@ fn test_keys(context: &Context) -> bool {
     for _ in 0..SECURITY {
         let (num1, num2) = (random(), random());
         let numv = vec![num1, num2];
-        let e_numv = encrypt_bytes(&numv, context.e.as_ref().unwrap(), context.n.as_ref().unwrap());
-        let d_nums = decrypt_bytes(&e_numv, context.d.as_ref().unwrap(), context.n.as_ref().unwrap());
+        let e_numv = encrypt_bytes(&numv, e, n);
+        let d_nums = decrypt_bytes(&e_numv, d, n);
 
         failed |= num1 != d_nums[0] || num2 != d_nums[1];
 
@@ -276,16 +226,14 @@ fn generate_keys(context: &mut Context, size: u32) {
     let p: BigUint;
     let q: BigUint;
 
-    let upper_bound = BigUint::from(10u32).pow(size);
-
     if context.p.is_none()  {
-        p = generate_prime_below(&upper_bound);
+        p = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
     } else {
         p = context.p.clone().unwrap();
     }
 
     if context.q.is_none() {
-        q = generate_prime_below(&upper_bound);
+        q = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
     } else {
         q = context.q.clone().unwrap();
     }
@@ -317,9 +265,9 @@ fn generate_keys(context: &mut Context, size: u32) {
     context.e = Some(e);
     context.d = Some(d);
 
-    if test_keys(&context) {
+    if test_keys(context.e.as_ref().unwrap(), &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap()) {
         panic!("Failed!");
-    } 
+    }
 }
 
 fn show(context: &Context) {
@@ -406,129 +354,23 @@ fn decrypt_data(encrypted_data: &EncryptedDataList, d: &BigUint, n: &BigUint) ->
     }
 }
 
-fn encrypt(context: &mut Context) {
-    match input("What data to encrypt?\r\nNumber(s) / Text / File / Already stored data [n/t/f/s]?> ").unwrap().to_lowercase().trim() {
-        "n" => {
-            match input_integers::<BigUint>("> ") {
-                Ok(data) => context.data = DataList::Numbers(data),
-                Err(e) => {
-                    println!("{e}");
-                    return;
-                }
-            }
-        },
-        "t" => {
-            let text = input("> ").unwrap();
-            context.data = DataList::Text(text.trim().chars().map(|c| c as u32).collect::<Vec<u32>>());
-        },
-        "f" => {
-            let data = match read_file(&input("Filename > ").unwrap()) {
-                Ok(contents) => contents,
-                Err(e) => {
-                    println!("{e}");
-                    return;
-                }
-            };
-
-            context.data = match input("Interprete this data as Number(s) or Text [n/t]?> ").unwrap().to_lowercase().trim() {
-                "n" => {
-                    match parse_integers::<BigUint>(data) {
-                        Ok(data) => DataList::Numbers(data),
-                        Err(_) => {
-                            println!("Error: Couldn't parse data");
-                            return;
-                        }
-                    }
-                },
-                "t" => DataList::Text(data.trim().chars().map(|c| c as u32).collect::<Vec<u32>>()),
-                _ => {
-                    println!("Error: Unknown action");
-                    return;
-                }
-            };
-        },
-        "s" => {},
-        "" => return,
-        _ => {
-            println!("Error: Unknown action");
-            return;
-        }
+fn help(verbose: bool) {
+    println!();
+    println!("RSA asymetrical data encryption");
+    if verbose {
+        println!();
+        println!("g: Generate keys");
+        println!("i: Input keys / initial numbers to generate the keys");
+        println!("e: Encrypt data");
+        println!("d: Decrypt data");
+        println!("s: Show saved variables");
+        println!("f: Import or Export data");
+        println!("h: Show this help");
+        println!("q: Quit");
+    } else {
+        println!();
+        println!("Type 'h' for help");
     }
-
-    context.encrypted_data = encrypt_data(&context.data, context.e.as_ref().unwrap(), context.n.as_ref().unwrap());
-    println!("{}", context.encrypted_data);
-}
-
-fn decrypt(context: &mut Context) {
-    match input("What data to decrypt?\r\nNumber(s) / Text / File / Already stored encrypted data [n/t/f/s]?> ").unwrap().to_lowercase().trim() {
-        "n" => match input_integers::<BigUint>("> ") {
-            Ok(data) => {
-                context.encrypted_data = EncryptedDataList::EncryptedNumbers(data);
-            },
-            Err(e) => {
-                println!("{e}");
-                return;
-            }
-        },
-        "t" => match input_integers::<BigUint>("> ") {
-            Ok(data) => {
-                context.encrypted_data = EncryptedDataList::EncryptedText(data);
-            },
-            Err(e) => {
-                println!("{e}");
-                return;
-            }
-        },
-        "f" => {
-            let data = match read_file(&input("Filename > ").unwrap()) {
-                Ok(contents) => contents,
-                Err(e) => {
-                    println!("{e}");
-                    return;
-                }
-            };
-
-            context.encrypted_data = match input("Interprete this data as Encrypted Number(s) or Encrypted Text [n/t]?> ").unwrap().to_lowercase().trim() {
-                "n" => {
-                    match parse_integers::<BigUint>(data) {
-                        Ok(data) => EncryptedDataList::EncryptedNumbers(data),
-                        Err(_) => {
-                            println!("Error: Couldn't parse data");
-                            return;
-                        }
-                    }
-                },
-                "t" => {
-                    match parse_integers::<BigUint>(data) {
-                        Ok(data) => EncryptedDataList::EncryptedText(data),
-                        Err(_) => {
-                            println!("Error: Couldn't parse data");
-                            return;
-                        }
-                    }
-                },
-                _ => {
-                    println!("Error: Unknown action");
-                    return;
-                }
-            };
-        },
-
-        "s" => {
-            if let EncryptedDataList::Empty = context.encrypted_data {
-                println!("Error: Encrypt Data first");
-                return;
-            }
-        },
-        "" => return,
-        _ => {
-            println!("Error: Unknown action");
-            return;
-        }
-    }
-
-    context.decrypted_data = decrypt_data(&context.encrypted_data, context.d.as_ref().unwrap(), context.n.as_ref().unwrap());
-    println!("{}", context.decrypted_data);
 }
 
 fn main() {
@@ -549,7 +391,7 @@ fn main() {
     loop {
         match input("\r\n[g/i/e/d/s/f/h/q]?> ").unwrap().to_lowercase().trim() {
             "g" => {
-                match input("Enter key size (10^n) > ").unwrap().trim().parse::<u32>() {
+                match input_integer::<u32>("Enter key size (2^n) > ") {
                     Ok(size) => {
                         let start = Instant::now();
 
@@ -620,14 +462,131 @@ fn main() {
                 if context.e.is_none() || context.n.is_none() {
                     println!("Error: Generate or input keys first");
                 } else {
-                    encrypt(&mut context);
+                    match input("What data to encrypt?\r\nNumber(s) / Text / File / Already stored data [n/t/f/s]?> ").unwrap().to_lowercase().trim() {
+                        "n" => {
+                            match input_integers::<BigUint>("> ") {
+                                Ok(data) => context.data = DataList::Numbers(data),
+                                Err(e) => {
+                                    println!("{e}");
+                                    continue;
+                                }
+                            }
+                        },
+                        "t" => {
+                            let text = input("> ").unwrap();
+                            context.data = DataList::Text(text.trim().chars().map(|c| c as u32).collect::<Vec<u32>>());
+                        },
+                        "f" => {
+                            let data = match read_file(&input("Filename > ").unwrap()) {
+                                Ok(contents) => contents,
+                                Err(e) => {
+                                    println!("{e}");
+                                    continue;
+                                }
+                            };
+
+                            context.data = match input("Interprete this data as Number(s) or Text [n/t]?> ").unwrap().to_lowercase().trim() {
+                                "n" => {
+                                    match parse_integers::<BigUint>(data) {
+                                        Ok(data) => DataList::Numbers(data),
+                                        Err(_) => {
+                                            println!("Error: Couldn't parse data");
+                                            continue;
+                                        }
+                                    }
+                                },
+                                "t" => DataList::Text(data.trim().chars().map(|c| c as u32).collect::<Vec<u32>>()),
+                                _ => {
+                                    println!("Error: Unknown action");
+                                    continue;
+                                }
+                            };
+                        },
+                        "s" => {},
+                        "" => continue,
+                        _ => {
+                            println!("Error: Unknown action");
+                            continue;
+                        }
+                    }
+
+                    context.encrypted_data = encrypt_data(&context.data, context.e.as_ref().unwrap(), context.n.as_ref().unwrap());
+                    println!("{}", context.encrypted_data);
                 }
             },
             "d" => {
                 if context.d.is_none() || context.n.is_none() {
                     println!("Error: Generate or input keys first");
                 } else {
-                    decrypt(&mut context);
+                    match input("What data to decrypt?\r\nNumber(s) / Text / File / Already stored encrypted data [n/t/f/s]?> ").unwrap().to_lowercase().trim() {
+                        "n" => match input_integers::<BigUint>("> ") {
+                            Ok(data) => {
+                                context.encrypted_data = EncryptedDataList::EncryptedNumbers(data);
+                            },
+                            Err(e) => {
+                                println!("{e}");
+                                continue;
+                            }
+                        },
+                        "t" => match input_integers::<BigUint>("> ") {
+                            Ok(data) => {
+                                context.encrypted_data = EncryptedDataList::EncryptedText(data);
+                            },
+                            Err(e) => {
+                                println!("{e}");
+                                continue;
+                            }
+                        },
+                        "f" => {
+                            let data = match read_file(&input("Filename > ").unwrap()) {
+                                Ok(contents) => contents,
+                                Err(e) => {
+                                    println!("{e}");
+                                    continue;
+                                }
+                            };
+
+                            context.encrypted_data = match input("Interprete this data as Encrypted Number(s) or Encrypted Text [n/t]?> ").unwrap().to_lowercase().trim() {
+                                "n" => {
+                                    match parse_integers::<BigUint>(data) {
+                                        Ok(data) => EncryptedDataList::EncryptedNumbers(data),
+                                        Err(_) => {
+                                            println!("Error: Couldn't parse data");
+                                            continue;
+                                        }
+                                    }
+                                },
+                                "t" => {
+                                    match parse_integers::<BigUint>(data) {
+                                        Ok(data) => EncryptedDataList::EncryptedText(data),
+                                        Err(_) => {
+                                            println!("Error: Couldn't parse data");
+                                            continue;
+                                        }
+                                    }
+                                },
+                                _ => {
+                                    println!("Error: Unknown action");
+                                    continue;
+                                }
+                            };
+                        },
+
+                        "s" => {
+                            if let EncryptedDataList::Empty = context.encrypted_data {
+                                println!("Error: Encrypt Data first");
+                                continue;
+                            }
+                        },
+                        "" => continue,
+                        _ => {
+                            println!("Error: Unknown action");
+                            continue;
+                        }
+                    }
+
+                    context.decrypted_data = decrypt_data(&context.encrypted_data, context.d.as_ref().unwrap(), context.n.as_ref().unwrap());
+                    println!("{}", context.decrypted_data);
                 }
             }
             "s" =>  show(&context),
