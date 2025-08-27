@@ -12,7 +12,7 @@ use num_integer::Integer;
 use num_primes;
 
 
-const SECURITY: u32 = 8;
+const SECURITY: u32 = 4;
 
 
 struct Context {
@@ -79,7 +79,7 @@ fn parse_integer<T: FromStr>(text: &str) -> Result<T, ()> {
     for c in text.chars() {
         match c {
             n@('0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9') => text_.push(n),
-            '_'|'.'|','|' ' => {},
+            '_'|'.'|','|' '|'\n' => {},
             _ => return Err(())
         }
     }
@@ -101,7 +101,7 @@ fn parse_integers<T: FromStr>(mut text: String) -> Result<Vec<T>, ()> {
 
     for c in text.chars() {
         match c {
-            '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'_' => {},
+            '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'|'_'|'.' => {},
             ' '|','|'\n' => {
                 if s < i {
                     match parse_integer::<T>(&text[s..i]) {
@@ -148,7 +148,7 @@ fn write_file(filename: &str, data: &[u8]) -> Result<(), &'static str> {
         Ok(file) => file,
         Err(_) => return Err("Error: Failed to open file")
     };
-    
+
     match file.write_all(data) {
         Ok(_) => Ok(()),
         Err(_) => Err("Error: Failed to write to file")
@@ -221,25 +221,37 @@ fn test_keys(e: &BigUint, d: &BigUint, n: &BigUint) -> bool {
 }
 
 fn generate_keys(context: &mut Context, size: u32) {
+    let start = Instant::now();
+
     let mut rng = rand::thread_rng();
 
     let p: BigUint;
     let q: BigUint;
 
+    print!("|      | Generating p...");
+    let _ = io::stdout().flush();
     if context.p.is_none()  {
         p = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
     } else {
         p = context.p.clone().unwrap();
     }
 
+    print!("\r|#     | Generating q...");
+    let _ = io::stdout().flush();
     if context.q.is_none() {
         q = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
     } else {
         q = context.q.clone().unwrap();
     }
 
+    print!("\r|##    | Calculating N...");
+    let _ = io::stdout().flush();
     let n = &p * &q;
+    print!("\r|###   | Calculating Phi(N)...");
+    let _ = io::stdout().flush();
     let phi_n = (&p - BigUint::one()) * (&q - BigUint::one());
+    print!("\r|####  | Generating e...      ");
+    let _ = io::stdout().flush();
 
     let e = BigUint::from( if &phi_n > &BigUint::from(65537u32) {
         65537u32
@@ -252,6 +264,8 @@ fn generate_keys(context: &mut Context, size: u32) {
             i = rng.gen_range(2..phi_n.to_u32().unwrap());
         }
     } );
+    print!("\r|##### | Calculating d...");
+    let _ = io::stdout().flush();
 
     let mut d = modinv(&e, &phi_n).unwrap();
     if d == e {
@@ -265,9 +279,14 @@ fn generate_keys(context: &mut Context, size: u32) {
     context.e = Some(e);
     context.d = Some(d);
 
+    print!("\r|######| Testing keys... ");
+    let _ = io::stdout().flush();
+    let _ = io::stdout().flush();
     if test_keys(context.e.as_ref().unwrap(), &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap()) {
         panic!("Failed!");
     }
+
+    println!("\rDone in {:.3?}          ", start.elapsed());
 }
 
 fn show(context: &Context) {
@@ -393,15 +412,11 @@ fn main() {
             "g" => {
                 match input_integer::<u32>("Enter key size (2^n) > ") {
                     Ok(size) => {
-                        let start = Instant::now();
-
                         context.p = None;
                         context.q = None;
                         generate_keys(&mut context, size);
 
                         show(&context);
-
-                        println!("Done in {:.3?}", start.elapsed());
                     },
                     Err(_) => println!("Error: Not a number")
                 }
@@ -593,7 +608,73 @@ fn main() {
             "f" => {
                 match input("Do you want to Import or Export data [i/e]?> ").unwrap().to_lowercase().trim() {
                     "i" => {
-                        todo!();
+                        let data = match read_file(&input("Filename > ").unwrap()) {
+                            Ok(data) => data,
+                            Err(e) => {
+                                println!("{e}");
+                                continue;
+                            }
+                        };
+
+                        match (|| -> Result<(), &str> {
+                            match input("What data is contained in the file [p/q/n/phi_n/e/d/data/edata]?> ").unwrap().to_lowercase().trim() {
+                                num@("p"|"q"|"n"|"phi_n"|"e"|"d") => {
+                                    match parse_integer::<BigUint>(&data) {
+                                        Ok(n) => {
+                                            match num {
+                                                "p" => context.p = Some(n),
+                                                "q" => context.q = Some(n),
+                                                "n" => context.n = Some(n),
+                                                "phi_n" => context.phi_n = Some(n),
+                                                "e" => context.e = Some(n),
+                                                "d" => context.d = Some(n),
+                                                _ => return Err("")
+                                            }
+                                        },
+                                        Err(_) => return Err("Error: Couldn't parse data")
+                                    }
+                                },
+                                list@("data"|"edata") => {
+                                    match list {
+                                        "data" => {
+                                            match input("Interprete this data as Number(s) or Text [n/t]?> ").unwrap().to_lowercase().trim() {
+                                                "n" => {
+                                                    match parse_integers::<BigUint>(data) {
+                                                        Ok(l) => context.data = DataList::Numbers(l),
+                                                        Err(_) => return Err("Error: Couldn't parse data")
+                                                    }
+                                                },
+                                                "t" => context.data = DataList::Text(data.trim().chars().map(|c| c as u32).collect::<Vec<u32>>()),
+                                                _ => return Err("Error: Unknown action")
+                                            }
+                                        },
+                                        "edata" => {
+                                            match input("Interprete this data as Encrypted Number(s) or Encrypted Text [n/t]?> ").unwrap().to_lowercase().trim() {
+                                                "n" => {
+                                                    match parse_integers::<BigUint>(data) {
+                                                        Ok(l) => context.encrypted_data = EncryptedDataList::EncryptedNumbers(l),
+                                                        Err(_) => return Err("Error: Couldn't parse data")
+                                                    }
+                                                },
+                                                "t" => {
+                                                    match parse_integers::<BigUint>(data) {
+                                                        Ok(l) => context.encrypted_data = EncryptedDataList::EncryptedText(l),
+                                                        Err(_) => return Err("Error: Couldn't parse data")
+                                                    }
+                                                }
+                                                _ => return Err("Error: Unknown action")
+                                            }
+                                        },
+                                        _ => return Err("")
+                                    }
+                                },
+                                _ => return Err("Error: Unknown action")
+                            }
+                            Ok(())
+                        })() {
+                            Ok(_) => {},
+                            Err(e) => println!("{e}")
+                        }
                     },
                     "e" => {
                         let data: String = match (|| -> Result<String, &str> {
@@ -633,7 +714,7 @@ fn main() {
                                     };
 
                                     s
-                                }
+                                },
                                 _ => return Err("Error: Unknown action")
                             } );
                         })() {
