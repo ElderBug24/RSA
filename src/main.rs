@@ -1,11 +1,11 @@
 use std::fmt;
-use std::io;
-use std::io::{Write, Read};
+use std::io::{self, Write, Read};
 use std::fs;
 use std::str::FromStr;
 use std::time::Instant;
 
 use rand::Rng;
+
 use num_bigint::{BigUint, RandBigInt, BigInt, ToBigInt};
 use num_traits::{One, Zero, ToPrimitive, ToBytes};
 use num_integer::Integer;
@@ -281,7 +281,6 @@ fn generate_keys(context: &mut Context, size: u32) {
 
     print!("\r|######| Testing keys... ");
     let _ = io::stdout().flush();
-    let _ = io::stdout().flush();
     if test_keys(context.e.as_ref().unwrap(), &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap()) {
         panic!("Failed!");
     }
@@ -382,7 +381,7 @@ fn help(verbose: bool) {
         println!("i: Input keys / initial numbers to generate the keys");
         println!("e: Encrypt data");
         println!("d: Decrypt data");
-        println!("s: Show saved variables");
+        println!("s: Show stored data");
         println!("f: Import or Export data");
         println!("h: Show this help");
         println!("q: Quit");
@@ -703,12 +702,12 @@ fn main() {
                                             } {
                                                 DataList::Numbers(l) => for num in l { s.push_str(&format!("{num}\n")); },
                                                 DataList::Text(l) => for num in l { s.push_str(&format!("{num}\n")); },
-                                                DataList::Empty => {}
+                                                DataList::Empty => return Err("Not set yet")
                                             }
                                         },
                                         "edata" => match &context.encrypted_data {
                                             EncryptedDataList::EncryptedNumbers(l)|EncryptedDataList::EncryptedText(l) => for num in l { s.push_str(&format!("{num}\n")); },
-                                            EncryptedDataList::Empty => {}
+                                            EncryptedDataList::Empty => return Err("Not set yet")
                                         },
                                         _ => return Err("")
                                     };
