@@ -7,12 +7,12 @@ use std::time::Instant;
 use rand::Rng;
 
 use num_bigint::{BigUint, RandBigInt, BigInt, ToBigInt};
-use num_traits::{One, Zero, ToPrimitive, ToBytes};
+use num_traits::{One, Zero, ToPrimitive};
 use num_integer::Integer;
 use num_primes;
 
 
-const SECURITY: u32 = 4;
+const SECURITY: u32 = 8;
 
 
 struct Context {
@@ -29,7 +29,7 @@ struct Context {
 
 enum DataList {
     Numbers(Vec<BigUint>),
-    Text(Vec<u32>),
+    Text(Vec<u8>),
     Empty
 }
 
@@ -43,7 +43,7 @@ impl fmt::Display for DataList {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self {
             DataList::Numbers(data) => write!(formatter, "{:?}", data),
-            DataList::Text(data) => write!(formatter, "\"{}\"", data.iter().map(|&code| char::from_u32(code).unwrap()).collect::<String>()),
+            DataList::Text(data) => write!(formatter, "\"{}\"", std::str::from_utf8(data).unwrap()),
             DataList::Empty => write!(formatter, "[]")
         }
     }
@@ -196,23 +196,23 @@ fn modinv(a: &BigUint, m: &BigUint) -> Option<BigUint> {
 
 fn test_keys(e: &BigUint, d: &BigUint, n: &BigUint) -> bool {
     let mut rng = rand::thread_rng();
-    let mut failed = false;
 
-    let mut random: Box<dyn FnMut() -> u32> = if n <= &BigUint::from(u32::MAX) {
-        Box::new(move || rng.gen_biguint_below(n).to_u32().unwrap())
+    let upper_bound = if n < &BigUint::from(u32::MAX) {
+        n
     } else {
-        Box::new(move || rng.gen_range(2..u32::MAX))
+        &BigUint::from(u32::MAX)
+    };
+
+    let mut random = || {
+        rng.gen_biguint_below(upper_bound)
     };
 
     for _ in 0..SECURITY {
-        let (num1, num2) = (random(), random());
-        let numv = vec![num1, num2];
-        let e_numv = encrypt_bytes(&numv, e, n);
-        let d_nums = decrypt_bytes(&e_numv, d, n);
+        let num = random();
+        let e_num = num.modpow(e, n);
+        let d_num = e_num.modpow(d, n);
 
-        failed |= num1 != d_nums[0] || num2 != d_nums[1];
-
-        if failed {
+        if num != d_num {
             return true;
         }
     }
@@ -312,29 +312,21 @@ fn decrypt_byte(data: &BigUint, d: &BigUint, n: &BigUint) -> u8 {
     return b;
 }
 
-fn encrypt_bytes(data: &Vec<u32>, e: &BigUint, n: &BigUint) -> Vec<BigUint> {
-    let mut encrypted_data: Vec<BigUint> = Vec::with_capacity(data.len() * 4);
+fn encrypt_bytes(data: &Vec<u8>, e: &BigUint, n: &BigUint) -> Vec<BigUint> {
+    let mut encrypted_data: Vec<BigUint> = Vec::with_capacity(data.len());
 
     for num in data {
-        let num = num.to_be_bytes();
-        for b in num {
-            encrypted_data.push(encrypt_byte(b, &e, &n));
-        }
+        encrypted_data.push(encrypt_byte(*num, &e, &n));
     }
 
     return encrypted_data;
 }
 
-fn decrypt_bytes(encrypted_data: &Vec<BigUint>, d: &BigUint, n: &BigUint) -> Vec<u32> {
-    let mut data: Vec<u32> = Vec::with_capacity(encrypted_data.len() / 4);
+fn decrypt_bytes(encrypted_data: &Vec<BigUint>, d: &BigUint, n: &BigUint) -> Vec<u8> {
+    let mut data: Vec<u8> = Vec::with_capacity(encrypted_data.len());
 
-    for i in 0..data.capacity() {
-        let e_num = &encrypted_data[(i*4)..((i+1)*4)];
-        let mut num = [0u8; 4];
-        for i in 0..4 {
-            num[i] = decrypt_byte(&e_num[i], &d, &n);
-        }
-        data.push(u32::from_be_bytes(num));
+    for num in encrypted_data {
+        data.push(decrypt_byte(&num, &d, &n));
     }
 
     return data;
@@ -488,7 +480,7 @@ fn main() {
                         },
                         "t" => {
                             let text = input("> ").unwrap();
-                            context.data = DataList::Text(text.trim().chars().map(|c| c as u32).collect::<Vec<u32>>());
+                            context.data = DataList::Text(text.trim().bytes().collect::<Vec<u8>>());
                         },
                         "f" => {
                             let data = match read_file(&input("Filename > ").unwrap()) {
@@ -509,7 +501,7 @@ fn main() {
                                         }
                                     }
                                 },
-                                "t" => DataList::Text(data.trim().chars().map(|c| c as u32).collect::<Vec<u32>>()),
+                                "t" => DataList::Text(data.trim().bytes().collect::<Vec<u8>>()),
                                 _ => {
                                     println!("Error: Unknown action");
                                     continue;
@@ -643,7 +635,7 @@ fn main() {
                                                         Err(_) => return Err("Error: Couldn't parse data")
                                                     }
                                                 },
-                                                "t" => context.data = DataList::Text(data.trim().chars().map(|c| c as u32).collect::<Vec<u32>>()),
+                                                "t" => context.data = DataList::Text(data.trim().bytes().collect::<Vec<u8>>()),
                                                 _ => return Err("Error: Unknown action")
                                             }
                                         },
@@ -688,7 +680,6 @@ fn main() {
                                         "d" => if let Some(ref d) = context.d { d } else { return Err("Not set yet"); }
                                         _ => return Err("")
                                     };
-
                                     format!("{n}\n")
                                 },
                                 list@("data"|"edata"|"ddata") => {
