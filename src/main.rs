@@ -723,7 +723,7 @@ fn main() {
                     _ => println!("Error: Unknown action")
                 }
             },
-            "h" => help(true),
+            "h" | "?" => help(true),
             "q" => return,
             "" => {},
             _ => println!("Error: Unknown action")
