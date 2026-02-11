@@ -213,63 +213,77 @@ fn test_keys(e: &BigUint, d: &BigUint, n: &BigUint) -> bool {
         let d_num = e_num.modpow(d, n);
 
         if num != d_num {
-            return true;
+            return false;
         }
     }
 
-    return false;
+    return true;
 }
 
 fn generate_keys(context: &mut Context, size: u32) {
     let start = Instant::now();
 
     let mut rng = rand::thread_rng();
+    let mut p: BigUint;
+    let mut q: BigUint;
+    let mut n: BigUint;
+    let mut phi_n: BigUint;
+    let mut e: BigUint;
+    let mut d: BigUint;
 
-    let p: BigUint;
-    let q: BigUint;
-
-    print!("|      | Generating p...");
-    let _ = io::stdout().flush();
-    if context.p.is_none()  {
-        p = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
-    } else {
-        p = context.p.clone().unwrap();
-    }
-
-    print!("\r|#     | Generating q...");
-    let _ = io::stdout().flush();
-    if context.q.is_none() {
-        q = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
-    } else {
-        q = context.q.clone().unwrap();
-    }
-
-    print!("\r|##    | Calculating N...");
-    let _ = io::stdout().flush();
-    let n = &p * &q;
-    print!("\r|###   | Calculating Phi(N)...");
-    let _ = io::stdout().flush();
-    let phi_n = (&p - BigUint::one()) * (&q - BigUint::one());
-    print!("\r|####  | Generating e...      ");
-    let _ = io::stdout().flush();
-
-    let e = BigUint::from( if &phi_n > &BigUint::from(65537u32) {
-        65537u32
-    } else {
-        let mut i = 2;
-        loop {
-            if n.gcd(&BigUint::from(i)) == BigUint::one() && phi_n.gcd(&BigUint::from(i)) == BigUint::one() {
-                break i;
-            }
-            i = rng.gen_range(2..phi_n.to_u32().unwrap());
+    loop {
+        print!("|      | Generating p...");
+        let _ = io::stdout().flush();
+        if context.p.is_none()  {
+            p = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
+        } else {
+            p = context.p.clone().unwrap();
         }
-    } );
-    print!("\r|##### | Calculating d...");
-    let _ = io::stdout().flush();
 
-    let mut d = modinv(&e, &phi_n).unwrap();
-    if d == e {
-        d += &phi_n;
+        print!("\r|#     | Generating q...");
+        let _ = io::stdout().flush();
+        if context.q.is_none() {
+            q = BigUint::from_bytes_be(&num_primes::Generator::new_prime(size as usize).to_bytes_be());
+        } else {
+            q = context.q.clone().unwrap();
+        }
+
+        print!("\r|##    | Calculating N...");
+        let _ = io::stdout().flush();
+        n = &p * &q;
+        print!("\r|###   | Calculating Phi(N)...");
+        let _ = io::stdout().flush();
+        phi_n = (&p - BigUint::one()) * (&q - BigUint::one());
+        print!("\r|####  | Generating e...      ");
+        let _ = io::stdout().flush();
+
+        e = BigUint::from( if &phi_n > &BigUint::from(65537u32) {
+            65537u32
+        } else {
+            let mut i = 2;
+            loop {
+                if n.gcd(&BigUint::from(i)) == BigUint::one() && phi_n.gcd(&BigUint::from(i)) == BigUint::one() {
+                    break i;
+                }
+                i = rng.gen_range(2..phi_n.to_u32().unwrap());
+            }
+        } );
+        print!("\r|##### | Calculating d...");
+        let _ = io::stdout().flush();
+
+        d = modinv(&e, &phi_n).unwrap();
+        if d == e {
+            d += &phi_n;
+        }
+
+        print!("\r|######| Testing keys... ");
+        let _ = io::stdout().flush();
+        if test_keys(&e, &d, &n) {
+            break;
+        }
+        else {
+            println!("Testing Failed!");
+        }
     }
 
     context.p = Some(p);
@@ -278,12 +292,6 @@ fn generate_keys(context: &mut Context, size: u32) {
     context.phi_n = Some(phi_n);
     context.e = Some(e);
     context.d = Some(d);
-
-    print!("\r|######| Testing keys... ");
-    let _ = io::stdout().flush();
-    if test_keys(context.e.as_ref().unwrap(), &context.d.as_ref().unwrap(), &context.n.as_ref().unwrap()) {
-        panic!("Failed!");
-    }
 
     println!("\rDone in {:.3?}          ", start.elapsed());
 }
